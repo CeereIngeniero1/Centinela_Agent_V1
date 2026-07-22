@@ -1,0 +1,20 @@
+{
+  "name": "buscatitulos",
+  "version": "1.0.0",
+  "description": "Automatización de búsqueda de títulos en ANM SIGM",
+  "main": "buscaTitulos.js",
+  "scripts": {
+    "start": "node buscaTitulos.js",
+    "visor": "node visorGeografico.js Collective",
+    "visor:general": "node visorGeograficoGeneral.js Totas",
+    "unir-areas": "node unirAreas.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "colors": "^1.4.0",
+    "nodemailer": "^9.0.3",
+    "puppeteer": "^6.0.0"
+  }
+}
