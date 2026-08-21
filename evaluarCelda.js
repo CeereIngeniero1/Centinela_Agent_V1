@@ -1,5 +1,6 @@
 const colors = require("colors");
 const { correo } = require("./correo");
+const { lanzarRadicadorLiberacion } = require("./centinelaRadicador");
 
 const MESES = {
   jan: 0,
@@ -83,6 +84,9 @@ function crearEstadoAlertasBase(anterior, registro) {
       statusAnterior,
       statusActual,
       errorEnvio: null,
+      radicadorLanzado: Boolean(anterior?.alertas?.liberacion?.radicadorLanzado),
+      radicadorFecha: anterior?.alertas?.liberacion?.radicadorFecha || null,
+      radicadorError: null,
     },
     reapertura: {
       enviado: Boolean(anterior?.alertas?.reapertura?.enviado),
@@ -92,6 +96,17 @@ function crearEstadoAlertasBase(anterior, registro) {
       errorEnvio: null,
     },
   };
+}
+
+function describirEstadoCelda(atributos) {
+  const codigo = atributos?.CELL_STATUS_CODE;
+  if (!codigo) {
+    return { mensaje: "Estado: desconocido (sin CELL_STATUS_CODE)", libre: null };
+  }
+  if (codigo === "A") {
+    return { mensaje: "Estado: LIBRE (A)", libre: true };
+  }
+  return { mensaje: `Estado: NO LIBRE (${codigo})`, libre: false };
 }
 
 function evaluarCambiosCelda(anterior, registro) {
@@ -130,6 +145,20 @@ async function procesarAlertasYCorreo({ anterior, registro, empresa }) {
 
   const alertas = crearEstadoAlertasBase(anterior, registro);
   const cambios = evaluarCambiosCelda(anterior, registro);
+
+  if (cambios.liberacion && !alertas.liberacion.radicadorLanzado) {
+    const resultado = await lanzarRadicadorLiberacion({ empresa, registro });
+    if (resultado.ok) {
+      alertas.liberacion.radicadorLanzado = true;
+      alertas.liberacion.radicadorFecha = new Date().toISOString();
+    } else if (!resultado.omitido) {
+      alertas.liberacion.radicadorError = resultado.error;
+    }
+  } else if (cambios.liberacion && alertas.liberacion.radicadorLanzado) {
+    console.log(
+      colors.yellow("  Radicador ya lanzado previamente, omitiendo")
+    );
+  }
 
   if (cambios.liberacion && !alertas.liberacion.enviado) {
     try {
@@ -174,6 +203,7 @@ async function procesarAlertasYCorreo({ anterior, registro, empresa }) {
 module.exports = {
   parseFechaReapertura,
   esFechaFutura,
+  describirEstadoCelda,
   evaluarCambiosCelda,
   procesarAlertasYCorreo,
 };

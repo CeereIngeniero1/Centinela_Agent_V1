@@ -1,0 +1,74 @@
+{
+  "CARNEOLA": {
+    "activo": false,
+    "empresa": "CARNEOLA",
+    "codigoPin": "Co",
+    "agente": 1,
+    "userAgente": "usuario_agente",
+    "passAgente": "clave_agente"
+  },
+  "Valleduper": {
+    "activo": false,
+    "empresa": "Valleduper",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  },
+  "MAX": {
+    "activo": false,
+    "empresa": "MAX",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  },
+  "Collective": {
+    "activo": false,
+    "empresa": "Collective",
+    "codigoPin": "Co",
+    "agente": 1,
+    "userAgente": "usuario_agente",
+    "passAgente": "clave_agente"
+  },
+  "NegoYMetales": {
+    "activo": false,
+    "empresa": "NegoYMetales",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  },
+  "Freeport": {
+    "activo": false,
+    "empresa": "Freeport",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  },
+  "Provenza": {
+    "activo": false,
+    "empresa": "Provenza",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  },
+  "Operadora": {
+    "activo": false,
+    "empresa": "Operadora",
+    "codigoPin": "",
+    "agente": 0,
+    "userAgente": "-",
+    "passAgente": "-"
+  },
+  "Miranda": {
+    "activo": false,
+    "empresa": "Miranda",
+    "codigoPin": "",
+    "agente": 1,
+    "userAgente": "",
+    "passAgente": ""
+  }
+}

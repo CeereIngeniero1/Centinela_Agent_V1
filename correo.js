@@ -1,5 +1,8 @@
+const path = require("path");
 const nodemailer = require("nodemailer");
 const os = require("os");
+
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const SMTP_HOST = process.env.SMTP_HOST || "mail.ceere.net";
 const SMTP_PORT = Number(process.env.SMTP_PORT || 465);

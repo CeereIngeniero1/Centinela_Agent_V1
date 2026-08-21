@@ -2,11 +2,20 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 const colors = require("colors");
-const { procesarAlertasYCorreo, describirEstadoCelda } = require("./evaluarCelda");
+const {
+  describirEstadoCelda,
+  evaluarCambiosCelda,
+  parseFechaReapertura,
+} = require("./evaluarCelda");
+const { correo } = require("./correo");
 const { cargarAreas } = require("./cargarAreas");
-const { obtenerPausaTrasLiberacionMs } = require("./centinelaRadicador");
 
-const ARCHIVO_AREAS = process.argv[2] || "Collective";
+const ARCHIVO_AREAS = process.argv[2] || "CARNEOLA";
+const AREA_A_RADICAR_PATH =
+  process.env.AREA_A_RADICAR_PATH ||
+  "C:\\Centinela_V4\\areas\\areaARadicar.json";
+const PAUSA_TRAS_AREA_A_RADICAR_MS =
+  Number(process.env.PAUSA_TRAS_AREA_A_RADICAR_MS) || 5000;
 
 let Areas;
 let EMPRESAS;
@@ -76,6 +85,191 @@ const MAX_REINTENTOS_BUSQUEDA = 2;
 function guardarJson(ruta, datos) {
   fs.mkdirSync(path.dirname(ruta), { recursive: true });
   fs.writeFileSync(ruta, JSON.stringify(datos, null, 2), "utf-8");
+}
+
+/** Encolar si no hay reopen, o si reopen es estrictamente futura. */
+function cumpleReopenParaEncolar(textoFecha) {
+  const limpio = String(textoFecha || "").trim();
+  if (!limpio) {
+    return { ok: true, motivo: "sin reopen" };
+  }
+  const fecha = parseFechaReapertura(limpio);
+  if (!fecha) {
+    // Texto raro: tratar como sin reopen usable
+    return { ok: true, motivo: "sin reopen válida" };
+  }
+  if (fecha.getTime() > Date.now()) {
+    return { ok: true, motivo: `reopen futura (${limpio})` };
+  }
+  return { ok: false, motivo: `reopen no futura (${limpio})` };
+}
+
+function areaTieneDatosRadicar(area) {
+  if (!area) return false;
+  const referencia = String(area.Referencia || "").trim();
+  const celdas = Array.isArray(area.Celdas) ? area.Celdas : [];
+  return (
+    referencia.length > 0 &&
+    celdas.some((c) => String(c || "").trim().length > 0)
+  );
+}
+
+function escribirAreaARadicar(registro) {
+  const entrada = {
+    NombreArea: registro.NombreArea,
+    Referencia: registro.Referencia,
+    Celdas: registro.Celdas?.length
+      ? registro.Celdas
+      : [registro.Referencia],
+  };
+
+  let actuales = [];
+  if (fs.existsSync(AREA_A_RADICAR_PATH)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(AREA_A_RADICAR_PATH, "utf-8"));
+      if (Array.isArray(raw)) {
+        actuales = raw;
+      }
+    } catch (_) {
+      actuales = [];
+    }
+  }
+
+  const filtrados = actuales.filter((a) => {
+    if (!areaTieneDatosRadicar(a)) return false;
+    return a.NombreArea !== entrada.NombreArea;
+  });
+  filtrados.push(entrada);
+
+  guardarJson(AREA_A_RADICAR_PATH, filtrados);
+  return AREA_A_RADICAR_PATH;
+}
+
+function crearEstadoAlertasBase(anterior, registro) {
+  const statusAnterior =
+    anterior?.atributos?.CELL_STATUS_CODE ||
+    anterior?.alertas?.liberacion?.statusActual ||
+    null;
+  const statusActual = registro.atributos?.CELL_STATUS_CODE || null;
+  const fechaAnterior =
+    anterior?.atributos?.CELL_REOPENING_DATE ||
+    anterior?.alertas?.reapertura?.fechaActual ||
+    "";
+  const fechaActual = registro.atributos?.CELL_REOPENING_DATE || "";
+
+  return {
+    liberacion: {
+      enviado: Boolean(anterior?.alertas?.liberacion?.enviado),
+      fechaEnvio: anterior?.alertas?.liberacion?.fechaEnvio || null,
+      statusAnterior,
+      statusActual,
+      errorEnvio: null,
+      areaARadicarEscrito: Boolean(
+        anterior?.alertas?.liberacion?.areaARadicarEscrito
+      ),
+      areaARadicarFecha: anterior?.alertas?.liberacion?.areaARadicarFecha || null,
+      areaARadicarError: null,
+    },
+    reapertura: {
+      enviado: Boolean(anterior?.alertas?.reapertura?.enviado),
+      fechaEnvio: anterior?.alertas?.reapertura?.fechaEnvio || null,
+      fechaAnterior,
+      fechaActual,
+      errorEnvio: null,
+    },
+  };
+}
+
+async function procesarAlertasCarneloa({ anterior, registro, empresa }) {
+  if (registro.sinResultados || registro.error) {
+    registro.alertas = crearEstadoAlertasBase(anterior, registro);
+    return registro.alertas;
+  }
+
+  const alertas = crearEstadoAlertasBase(anterior, registro);
+  const cambios = evaluarCambiosCelda(anterior, registro);
+  const fechaReopen = registro.atributos?.CELL_REOPENING_DATE || "";
+  const reopenOk = cumpleReopenParaEncolar(fechaReopen);
+
+  // Liberación + (reopen futura O sin reopen) → encolar en Centinela areaARadicar.json
+  if (
+    cambios.liberacion &&
+    reopenOk.ok &&
+    !alertas.liberacion.areaARadicarEscrito
+  ) {
+    try {
+      const destino = escribirAreaARadicar(registro);
+      alertas.liberacion.areaARadicarEscrito = true;
+      alertas.liberacion.areaARadicarFecha = new Date().toISOString();
+      console.log(
+        colors.green(
+          `  AREA A RADICAR: ${registro.NombreArea} → ${destino} (${reopenOk.motivo})`
+        )
+      );
+    } catch (error) {
+      alertas.liberacion.areaARadicarError = error.message;
+      console.log(
+        colors.red(`  Error escribiendo areaARadicar.json: ${error.message}`)
+      );
+    }
+  } else if (cambios.liberacion && !reopenOk.ok) {
+    console.log(
+      colors.yellow(
+        `  Liberación detectada, pero ${reopenOk.motivo} → no se encola`
+      )
+    );
+  } else if (cambios.liberacion && alertas.liberacion.areaARadicarEscrito) {
+    console.log(
+      colors.yellow("  Área ya encolada en areaARadicar.json, omitiendo")
+    );
+  }
+
+  if (cambios.liberacion && !alertas.liberacion.enviado) {
+    try {
+      await correo(1, registro.NombreArea, registro.Referencia, { empresa });
+      alertas.liberacion.enviado = true;
+      alertas.liberacion.fechaEnvio = new Date().toISOString();
+      console.log(
+        colors.green("  ALERTA: Posible área liberada → correo enviado")
+      );
+    } catch (error) {
+      alertas.liberacion.errorEnvio = error.message;
+      console.log(
+        colors.red(`  Error enviando correo liberación: ${error.message}`)
+      );
+    }
+  } else if (cambios.liberacion && alertas.liberacion.enviado) {
+    console.log(
+      colors.yellow(
+        "  Alerta liberación ya enviada previamente, omitiendo correo"
+      )
+    );
+  }
+
+  if (cambios.reapertura && !alertas.reapertura.enviado) {
+    try {
+      await correo(3, registro.NombreArea, registro.Referencia, { empresa });
+      alertas.reapertura.enviado = true;
+      alertas.reapertura.fechaEnvio = new Date().toISOString();
+      console.log(
+        colors.green("  ALERTA: Reapertura detectada → correo enviado")
+      );
+    } catch (error) {
+      alertas.reapertura.errorEnvio = error.message;
+      console.log(
+        colors.red(`  Error enviando correo reapertura: ${error.message}`)
+      );
+    }
+  } else if (cambios.reapertura && alertas.reapertura.enviado) {
+    console.log(
+      colors.yellow(
+        "  Alerta reapertura ya enviada previamente, omitiendo correo"
+      )
+    );
+  }
+
+  registro.alertas = alertas;
+  return alertas;
 }
 
 function rutaSalidaArea(empresa, nombreArea) {
@@ -679,20 +873,25 @@ async function procesarAreas(visorPage) {
       ? JSON.parse(fs.readFileSync(archivoSalida, "utf-8"))
       : null;
 
-    await procesarAlertasYCorreo({
+    const yaEncolada =
+      Boolean(anterior?.alertas?.liberacion?.areaARadicarEscrito);
+
+    await procesarAlertasCarneloa({
       anterior,
       registro,
       empresa,
     });
 
-    if (registro.alertas?.liberacion?.radicadorLanzado) {
-      const pausaMs = obtenerPausaTrasLiberacionMs();
+    if (
+      registro.alertas?.liberacion?.areaARadicarEscrito &&
+      !yaEncolada
+    ) {
       console.log(
         colors.cyan(
-          `  Área liberada: pausa ${pausaMs / 1000}s (radicador en segundo plano)...`
+          `  Área liberada con reopen futura: pausa ${PAUSA_TRAS_AREA_A_RADICAR_MS / 1000}s...`
         )
       );
-      await visorPage.waitForTimeout(pausaMs);
+      await visorPage.waitForTimeout(PAUSA_TRAS_AREA_A_RADICAR_MS);
     }
 
     guardarJson(archivoSalida, registro);

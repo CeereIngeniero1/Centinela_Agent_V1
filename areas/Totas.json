@@ -1,4 +1,13 @@
 {
+  "CARNEOLA": [
+    {
+      "NombreArea": "KAQ-11171PRUEBA",
+      "Referencia": "18N05N14M12R",
+      "Celdas": [
+        "18N05N14M12R"
+      ]
+    }
+  ],
   "Collective": [
     {
       "NombreArea": "Areaprueba",

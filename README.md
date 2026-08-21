@@ -62,7 +62,12 @@ EQUIPO_ACTUAL=NombreDelPC
 ├── cargarAreas.js              # Carga formato simple o multi-empresa
 ├── unirAreas.js                # Une varios JSON de empresa en Totas.json
 ├── evaluarCelda.js             # Reglas de liberación / reapertura
+├── centinelaRadicador.js       # Radicador automático Centinela V4
 ├── correo.js                   # Envío de alertas SMTP
+├── config/centinela/           # Config radicador por empresa
+│   ├── config.json
+│   ├── empresas.json           # (local, no versionar)
+│   └── empresas.example.json
 └── .env.example                # Plantilla de variables SMTP
 ```
 
@@ -180,6 +185,69 @@ npm run visor:general
 | Reapertura (3) | `CELL_REOPENING_DATE` es una fecha futura | Área con fecha de reapertura |
 
 Las alertas son idempotentes: si ya se envió (`alertas.*.enviado`), no se reenvía.
+
+---
+
+## Integración Centinela V4 (radicador automático)
+
+Al detectar **liberación** (status → `A`), además del correo:
+
+1. Lanza `radicadorBot.js` (vía `radicadorBuscadorTitulos.js`) con empresa, pin, **NombreArea** y la ruta a `areas/Totas.json`
+2. Centinela lee esa área directamente desde Totas (no se crea JSON en `Centinela_V4/areas`)
+3. El visor pausa unos segundos en esa área antes de continuar
+
+### Configuración
+
+Copia la plantilla y complétala:
+
+```bash
+copy config\centinela\empresas.example.json config\centinela\empresas.json
+```
+
+Edita [`config/centinela/empresas.json`](config/centinela/empresas.json) por cada empresa monitoreada:
+
+| Campo | Descripción |
+|-------|-------------|
+| `activo` | `true` para habilitar el radicador automático |
+| `empresa` | Clave en `InformacionEmpresas.json` de Centinela V4 |
+| `codigoPin` | Clave en `Pines.json` de Centinela V4 |
+| `agente` | `0` = login empresa · `1` = login agente |
+| `userAgente` / `passAgente` | Credenciales agente (si `agente=1`; si `0` usa `-`) |
+
+Rutas globales en [`config/centinela/config.json`](config/centinela/config.json):
+
+- `centinelaV4Path`: ruta a Centinela V4 (default `C:\Centinela_V4`)
+- `buscaTitulosAreasPath`: ruta al JSON de áreas (default `C:\BuscaTitulos\areas\Totas.json`)
+- `radicadorScript`: script a lanzar (`radicadorBot.js`)
+- `ventanaVisible`: abrir consola del radicador
+- `pausaTrasLiberacionMs`: pausa tras lanzar el radicador
+
+Equivalente manual:
+
+```bash
+node radicadorBuscadorTitulos.js CARNEOLA Co KAQ-11171PRUEBA 1 43987 "Sagitario_2026**" "C:\BuscaTitulos\areas\Totas.json"
+```
+
+Centinela busca en Totas la clave `CARNEOLA` y el `NombreArea` `KAQ-11171PRUEBA`, y radica solo esa área.
+
+Ejemplo Collective con agente:
+
+```json
+{
+  "Collective": {
+    "activo": true,
+    "empresa": "Collective",
+    "codigoPin": "Co",
+    "agente": 1,
+    "userAgente": "43987",
+    "passAgente": "tu_clave"
+  }
+}
+```
+
+> `config/centinela/empresas.json` está en `.gitignore` — no subas credenciales al repositorio.
+
+El estado del radicador queda en cada JSON de celda: `alertas.liberacion.radicadorLanzado`, `radicadorFecha`, `radicadorError`.
 
 ---
 
