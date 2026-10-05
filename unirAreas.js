@@ -1,22 +1,23 @@
 const fs = require("fs");
 const path = require("path");
 const colors = require("colors");
+const { AREAS_DIR, resolverRutaAreas } = require("./cargarAreas");
 
 /**
  * Une varios JSON de empresa (arrays) en un solo archivo multi-empresa.
+ * Lee areas/<Empresa>/<Empresa>.json de cada empresa.
  *
  * Uso:
  *   node unirAreas.js Collective MAX Operadora
  *   node unirAreas.js --out Totas Collective MAX Operadora
  *
- * Genera areas/Totas.json con forma:
+ * Genera areas/Totas/Totas.json con forma:
  * {
  *   "Collective": [ ... ],
  *   "MAX": [ ... ],
  *   "Operadora": [ ... ]
  * }
  */
-const AREAS_DIR = path.join(__dirname, "areas");
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -35,11 +36,7 @@ function parseArgs(argv) {
 }
 
 function leerAreasEmpresa(nombreEmpresa) {
-  const ruta = path.join(AREAS_DIR, `${nombreEmpresa}.json`);
-  if (!fs.existsSync(ruta)) {
-    throw new Error(`No existe: ${ruta}`);
-  }
-
+  const ruta = resolverRutaAreas(nombreEmpresa);
   const datos = JSON.parse(fs.readFileSync(ruta, "utf-8"));
   if (!Array.isArray(datos)) {
     throw new Error(
@@ -73,7 +70,8 @@ function main() {
     );
   }
 
-  const rutaSalida = path.join(AREAS_DIR, `${salida}.json`);
+  const rutaSalida = path.join(AREAS_DIR, salida, `${salida}.json`);
+  fs.mkdirSync(path.dirname(rutaSalida), { recursive: true });
   fs.writeFileSync(rutaSalida, JSON.stringify(resultado, null, 2), "utf-8");
 
   console.log(

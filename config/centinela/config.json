@@ -1,7 +1,4 @@
 {
   "centinelaV4Path": "C:\\Centinela_V4",
-  "radicadorScript": "radicadorBot.js",
-  "buscaTitulosAreasPath": "C:\\BuscaTitulos\\areas\\Totas.json",
-  "ventanaVisible": true,
   "pausaTrasLiberacionMs": 5000
 }

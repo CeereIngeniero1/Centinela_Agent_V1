@@ -6,18 +6,26 @@ const { procesarAlertasYCorreo, describirEstadoCelda } = require("./evaluarCelda
 const { cargarAreas } = require("./cargarAreas");
 const { obtenerPausaTrasLiberacionMs } = require("./centinelaRadicador");
 
-const ARCHIVO_AREAS = process.argv[2] || "Collective";
+// node visorGeografico.js <json>
+//   KAQ-11171            → busca areas/<Empresa>/KAQ-11171.json (empresa = carpeta)
+//   CARNEOLA/KAQ-11171   → areas/CARNEOLA/KAQ-11171.json
+//   Totas                → areas/Totas/Totas.json (empresa = cada clave del objeto)
+const ENTRADA_AREAS = process.argv[2] || "Totas";
 
 let Areas;
 let EMPRESAS;
+let RUTA_AREAS;
+let ARCHIVO_AREAS;
 try {
-  const cargado = cargarAreas(ARCHIVO_AREAS);
+  const cargado = cargarAreas(ENTRADA_AREAS);
   Areas = cargado.areas;
   EMPRESAS = cargado.empresas;
+  RUTA_AREAS = cargado.ruta;
+  ARCHIVO_AREAS = cargado.nombre;
   if (cargado.modo === "multi") {
     console.log(
       colors.cyan(
-        `Archivo multi-empresa: ${ARCHIVO_AREAS}.json (${EMPRESAS.length} empresas, ${Areas.length} áreas)`
+        `Archivo multi-empresa: ${RUTA_AREAS} (${EMPRESAS.length} empresas, ${Areas.length} áreas)`
       )
     );
     for (const empresa of EMPRESAS) {
@@ -27,7 +35,7 @@ try {
   } else {
     console.log(
       colors.cyan(
-        `Archivo de áreas: ${ARCHIVO_AREAS}.json (${Areas.length} áreas)`
+        `Archivo de áreas: ${RUTA_AREAS} → empresa ${EMPRESAS[0]} (${Areas.length} áreas)`
       )
     );
   }
@@ -644,13 +652,13 @@ async function buscarCeldaEnVisor(visorPage, area) {
 async function procesarAreas(visorPage) {
   console.log(
     colors.cyan(
-      `\nProcesando ${Areas.length} área(s) desde ${ARCHIVO_AREAS}.json...`
+      `\nProcesando ${Areas.length} área(s) desde ${RUTA_AREAS}...`
     )
   );
 
   for (let i = 0; i < Areas.length; i++) {
     const area = Areas[i];
-    const empresa = area.empresa || ARCHIVO_AREAS;
+    const { empresa } = area;
     console.log(
       colors.white(
         `\n[${i + 1}/${Areas.length}] [${empresa}] ${area.NombreArea} → ${area.Referencia}`
@@ -679,18 +687,18 @@ async function procesarAreas(visorPage) {
       ? JSON.parse(fs.readFileSync(archivoSalida, "utf-8"))
       : null;
 
+    const yaEnviada = Boolean(anterior?.alertas?.liberacion?.areaARadicarEscrito);
+
     await procesarAlertasYCorreo({
       anterior,
       registro,
       empresa,
     });
 
-    if (registro.alertas?.liberacion?.radicadorLanzado) {
+    if (registro.alertas?.liberacion?.areaARadicarEscrito && !yaEnviada) {
       const pausaMs = obtenerPausaTrasLiberacionMs();
       console.log(
-        colors.cyan(
-          `  Área liberada: pausa ${pausaMs / 1000}s (radicador en segundo plano)...`
-        )
+        colors.cyan(`  Área enviada a radicar: pausa ${pausaMs / 1000}s...`)
       );
       await visorPage.waitForTimeout(pausaMs);
     }

@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0.."
-node visorGeograficoGeneral.js Totas
+node visorGeografico.js Totas
 pause

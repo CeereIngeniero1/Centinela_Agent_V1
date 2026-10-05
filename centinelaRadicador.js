@@ -1,187 +1,92 @@
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
-const colors = require("colors");
 
 const CONFIG_DIR = path.join(__dirname, "config", "centinela");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const EMPRESAS_PATH = path.join(CONFIG_DIR, "empresas.json");
+const ARCHIVO_AREA_A_RADICAR = "areaARadicar.json";
+const CENTINELA_V4_PATH_DEFAULT = "C:\\Centinela_V4";
 
 let configCache = null;
 let empresasCache = null;
 
+function leerJsonOpcional(ruta) {
+  if (!fs.existsSync(ruta)) {
+    return {};
+  }
+  return JSON.parse(fs.readFileSync(ruta, "utf-8"));
+}
+
 function cargarConfigCentinela() {
   if (!configCache) {
-    if (!fs.existsSync(CONFIG_PATH)) {
-      throw new Error(`No existe ${CONFIG_PATH}`);
-    }
-    configCache = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    configCache = leerJsonOpcional(CONFIG_PATH);
   }
   if (!empresasCache) {
-    if (!fs.existsSync(EMPRESAS_PATH)) {
-      throw new Error(`No existe ${EMPRESAS_PATH}`);
-    }
-    empresasCache = JSON.parse(fs.readFileSync(EMPRESAS_PATH, "utf-8"));
+    empresasCache = leerJsonOpcional(EMPRESAS_PATH);
   }
   return { config: configCache, empresas: empresasCache };
 }
 
-function validarEmpresa(empresaKey) {
-  const { empresas } = cargarConfigCentinela();
-  const cfg = empresas[empresaKey];
+/**
+ * Centinela lee <centinelaV4Path>/areas/<Empresa>/areaARadicar.json.
+ * <Empresa> es el campo `empresa` de config/centinela/empresas.json, o la
+ * misma empresa de BuscaTitulos si no está mapeada.
+ */
+function rutaAreaARadicar(empresa) {
+  const { config, empresas } = cargarConfigCentinela();
+  const centinelaRoot = config.centinelaV4Path || CENTINELA_V4_PATH_DEFAULT;
+  const empresaCentinela = empresas[empresa]?.empresa || empresa;
 
-  if (!cfg) {
-    return { ok: false, error: `Empresa "${empresaKey}" no está en empresas.json` };
-  }
-  if (!cfg.activo) {
-    return { ok: false, error: "radicador inactivo (activo: false)" };
-  }
-  if (!cfg.empresa) {
-    return { ok: false, error: "Falta campo empresa" };
-  }
-  if (!cfg.codigoPin) {
-    return { ok: false, error: "Falta codigoPin" };
-  }
-  if (cfg.agente !== 0 && cfg.agente !== 1) {
-    return { ok: false, error: "agente debe ser 0 o 1" };
-  }
-  if (cfg.agente === 1) {
-    if (!cfg.userAgente) {
-      return { ok: false, error: "Falta userAgente (agente=1)" };
-    }
-    if (!cfg.passAgente) {
-      return { ok: false, error: "Falta passAgente (agente=1)" };
-    }
-  }
-
-  return { ok: true, cfg };
-}
-
-function resolverRutaAreasBuscaTitulos(config, registro) {
-  const configurada = config.buscaTitulosAreasPath;
-  if (configurada) {
-    const absoluta = path.isAbsolute(configurada)
-      ? configurada
-      : path.join(__dirname, configurada);
-    if (!fs.existsSync(absoluta)) {
-      throw new Error(`No existe buscaTitulosAreasPath: ${absoluta}`);
-    }
-    return absoluta;
-  }
-
-  // Fallback: areas/<archivoAreas>.json del propio monitoreo
-  const nombre = registro.archivoAreas || "Totas";
-  const fallback = path.join(__dirname, "areas", `${nombre}.json`);
-  if (!fs.existsSync(fallback)) {
+  const carpetaEmpresa = path.join(centinelaRoot, "areas", empresaCentinela);
+  if (!fs.existsSync(carpetaEmpresa)) {
     throw new Error(
-      `No hay buscaTitulosAreasPath en config y no existe ${fallback}`
+      `No existe la carpeta de la empresa en Centinela: ${carpetaEmpresa}`
     );
   }
-  return fallback;
+  return path.join(carpetaEmpresa, ARCHIVO_AREA_A_RADICAR);
 }
 
-function resolverScriptRadicador(config) {
-  const centinelaRoot = config.centinelaV4Path;
-  const solicitado = config.radicadorScript || "radicadorBot.js";
-  const botPath = path.join(centinelaRoot, "radicadorBot.js");
-  const launcherPath = path.join(centinelaRoot, "radicadorBuscadorTitulos.js");
-
-  if (!fs.existsSync(botPath)) {
-    throw new Error(`No existe el radicador: ${botPath}`);
-  }
-
-  // radicadorBot.js requiere radicadorConfig inicializado; el launcher con parámetros es radicadorBuscadorTitulos.js
-  if (
-    solicitado === "radicadorBot.js" ||
-    path.basename(solicitado) === "radicadorBot.js"
-  ) {
-    if (!fs.existsSync(launcherPath)) {
-      throw new Error(`No existe el launcher: ${launcherPath}`);
-    }
-    return { scriptPath: launcherPath, scriptFinal: "radicadorBot.js" };
-  }
-
-  const scriptPath = path.join(centinelaRoot, solicitado);
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`No existe el radicador: ${scriptPath}`);
-  }
-  return { scriptPath, scriptFinal: path.basename(scriptPath) };
+function areaTieneDatos(area) {
+  if (!area) return false;
+  const referencia = String(area.Referencia || "").trim();
+  const celdas = Array.isArray(area.Celdas) ? area.Celdas : [];
+  return (
+    referencia.length > 0 &&
+    celdas.some((c) => String(c || "").trim().length > 0)
+  );
 }
 
-function spawnRadicador({ config, cfg, nombreArea, areasSourcePath }) {
-  const { scriptPath, scriptFinal } = resolverScriptRadicador(config);
-
-  const spawnArgs = [
-    cfg.empresa,
-    cfg.codigoPin,
-    nombreArea,
-    String(cfg.agente),
-    cfg.agente === 1 ? cfg.userAgente : "-",
-    cfg.agente === 1 ? cfg.passAgente : "-",
-    areasSourcePath,
-  ];
-
-  const ventanaVisible = config.ventanaVisible !== false;
-  const spawnOptions = {
-    cwd: config.centinelaV4Path,
-    detached: true,
-    stdio: ventanaVisible ? "inherit" : "ignore",
-    windowsHide: !ventanaVisible,
+/**
+ * Agrega el área a areaARadicar.json de su empresa en Centinela.
+ * Descarta la plantilla vacía y reemplaza una entrada previa con el mismo NombreArea.
+ */
+function encolarAreaARadicar(registro) {
+  const destino = rutaAreaARadicar(registro.empresa);
+  const entrada = {
+    NombreArea: registro.NombreArea,
+    Referencia: registro.Referencia,
+    Celdas: registro.Celdas?.length ? registro.Celdas : [registro.Referencia],
   };
 
-  // CREATE_NEW_CONSOLE: abre ventana de consola en Windows sin depender de cmd "start".
-  if (ventanaVisible && process.platform === "win32") {
-    spawnOptions.creationFlags = 0x00000010;
+  let actuales = [];
+  if (fs.existsSync(destino)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(destino, "utf-8"));
+      if (Array.isArray(raw)) {
+        actuales = raw;
+      }
+    } catch (_) {
+      actuales = [];
+    }
   }
 
-  const child = spawn(process.execPath, [scriptPath, ...spawnArgs], spawnOptions);
-  child.unref();
+  const areas = actuales.filter(
+    (a) => areaTieneDatos(a) && a.NombreArea !== entrada.NombreArea
+  );
+  areas.push(entrada);
 
-  return { pid: child.pid, nombreArea, visible: ventanaVisible, scriptFinal };
-}
-
-async function lanzarRadicadorLiberacion({ empresa, registro }) {
-  try {
-    const validacion = validarEmpresa(empresa);
-    if (!validacion.ok) {
-      console.log(
-        colors.yellow(`  Radicador omitido: ${validacion.error}`)
-      );
-      return { ok: false, error: validacion.error, omitido: true };
-    }
-
-    const { config } = cargarConfigCentinela();
-    const nombreArea = registro.NombreArea;
-    if (!nombreArea) {
-      throw new Error("El registro no tiene NombreArea");
-    }
-
-    const areasSourcePath = resolverRutaAreasBuscaTitulos(config, registro);
-    const { pid, visible, scriptFinal } = spawnRadicador({
-      config,
-      cfg: validacion.cfg,
-      nombreArea,
-      areasSourcePath,
-    });
-
-    console.log(
-      colors.green(
-        `  RADICADOR: ${empresa} / ${nombreArea} desde ${areasSourcePath} → ${scriptFinal} ${
-          visible ? "en ventana visible" : "en segundo plano"
-        } (PID ${pid})`
-      )
-    );
-
-    return {
-      ok: true,
-      nombreArea,
-      areasSourcePath,
-      pid,
-    };
-  } catch (error) {
-    console.log(colors.red(`  Error lanzando radicador: ${error.message}`));
-    return { ok: false, error: error.message };
-  }
+  fs.writeFileSync(destino, JSON.stringify(areas, null, 2), "utf-8");
+  return destino;
 }
 
 function obtenerPausaTrasLiberacionMs() {
@@ -195,7 +100,7 @@ function obtenerPausaTrasLiberacionMs() {
 
 module.exports = {
   cargarConfigCentinela,
-  validarEmpresa,
-  lanzarRadicadorLiberacion,
+  rutaAreaARadicar,
+  encolarAreaARadicar,
   obtenerPausaTrasLiberacionMs,
 };

@@ -49,22 +49,24 @@ EQUIPO_ACTUAL=NombreDelPC
 ## Estructura del proyecto
 
 ```
-├── areas/                      # Listas de áreas por empresa
-│   ├── Collective.json         # Una empresa (array de áreas)
-│   ├── MAX.json
-│   ├── Operadora.json
-│   └── Totas.json              # Multi-empresa (objeto por empresa)
+├── areas/                      # Una subcarpeta por empresa
+│   ├── Collective/
+│   │   ├── Collective.json     # Archivo por defecto de la empresa
+│   │   └── 508750.json         # Otros archivos opcionales
+│   ├── CARNEOLA/CARNEOLA.json
+│   ├── MAX/MAX.json
+│   ├── Operadora/Operadora.json
+│   └── Totas/Totas.json        # Multi-empresa (objeto por empresa)
 ├── base de datos/              # Resultados generados (no se versiona)
 ├── .bat/                       # Lanzadores Windows
 ├── buscaTitulos.js             # Búsqueda de títulos (STA)
-├── visorGeografico.js          # Monitor de celdas (una empresa o Totas)
-├── visorGeograficoGeneral.js   # Atajo: lee Totas.json en ciclo infinito
-├── cargarAreas.js              # Carga formato simple o multi-empresa
+├── visorGeografico.js          # Visor único: monitor de celdas de cualquier JSON de áreas
+├── cargarAreas.js              # Localiza el JSON y deduce la empresa
 ├── unirAreas.js                # Une varios JSON de empresa en Totas.json
 ├── evaluarCelda.js             # Reglas de liberación / reapertura
-├── centinelaRadicador.js       # Radicador automático Centinela V4
+├── centinelaRadicador.js       # Envía áreas liberadas a areaARadicar.json de Centinela V4
 ├── correo.js                   # Envío de alertas SMTP
-├── config/centinela/           # Config radicador por empresa
+├── config/centinela/           # Ruta de Centinela y nombres de empresa
 │   ├── config.json
 │   ├── empresas.json           # (local, no versionar)
 │   └── empresas.example.json
@@ -75,7 +77,14 @@ EQUIPO_ACTUAL=NombreDelPC
 
 ## Formato de áreas
 
-### Una empresa (`areas/Collective.json`)
+Solo hay que indicar qué JSON consultar; la empresa se deduce sola:
+
+- **Lista de áreas** dentro de `areas/<Empresa>/`: la empresa es el nombre de la carpeta. El JSON no necesita indicar la empresa.
+- **Objeto multi-empresa** (`areas/Totas/Totas.json`): la empresa es cada clave del objeto.
+
+Un JSON tipo lista suelto en `areas/` (fuera de una carpeta de empresa) da error, porque no hay forma de saber de qué empresa es.
+
+### Una empresa (`areas/Collective/Collective.json`)
 
 ```json
 [
@@ -91,7 +100,7 @@ EQUIPO_ACTUAL=NombreDelPC
 - `Referencia`: `CELL_KEY_ID` que se busca en el visor
 - `Celdas`: listado auxiliar (la consulta usa `Referencia`)
 
-### Varias empresas (`areas/Totas.json`)
+### Varias empresas (`areas/Totas/Totas.json`)
 
 ```json
 {
@@ -115,7 +124,7 @@ Si tienes un JSON por empresa y quieres un solo archivo multi-empresa:
 node unirAreas.js Collective MAX Operadora
 ```
 
-Genera `areas/Totas.json`. Con otro nombre de salida:
+Lee `areas/<Empresa>/<Empresa>.json` de cada una y genera `areas/Totas/Totas.json`. Con otro nombre de salida:
 
 ```bash
 node unirAreas.js --out Totas Collective MAX Operadora
@@ -129,16 +138,21 @@ node unirAreas.js --out Totas Collective MAX Operadora
 |--------|----------|
 | `npm start` | Busca títulos con `Collective` (pasada única) |
 | `npm run visor` | Visor geográfico solo Collective |
-| `npm run visor:general` | Visor multi-empresa con `Totas.json` (ciclo infinito) |
+| `npm run visor:general` | Visor con `Totas.json` (todas las empresas, ciclo infinito) |
 | `npm run unir-areas` | Ayuda del unificador (pasa empresas como args) |
 
-También puedes pasar la empresa/archivo por argumento:
+Ambos scripts reciben solo el JSON a consultar (sin `.json`). Sin argumento, el visor usa `Totas`:
 
 ```bash
-node buscaTitulos.js Collective
-node visorGeografico.js MAX
-node visorGeograficoGeneral.js Totas
+node visorGeografico.js                      # areas/Totas/Totas.json
+node visorGeografico.js CARNEOLA             # areas/CARNEOLA/CARNEOLA.json → empresa CARNEOLA
+node visorGeografico.js 508750               # busca 508750.json en todas las carpetas de empresa
+node visorGeografico.js Collective/508750    # si el mismo nombre existe en varias empresas
+node visorGeografico.js "C:\ruta\areas.json" # ruta completa
+node buscaTitulos.js Collective              # areas/Collective/Collective.json
 ```
+
+Si un nombre existe en varias carpetas, el visor se detiene y lista las opciones (`Empresa/archivo`).
 
 Lanzadores `.bat`:
 
@@ -158,7 +172,7 @@ Lanzadores `.bat`:
 
 Ejecución: **una sola pasada**.
 
-### 2. Visor geográfico (`visorGeografico.js` / `visorGeograficoGeneral.js`)
+### 2. Visor geográfico (`visorGeografico.js`)
 
 1. Abre el Visor Geográfico (Html5Viewer)
 2. Consulta la capa **Celda** filtrando por `CELL_KEY_ID` = `Referencia`
@@ -188,66 +202,32 @@ Las alertas son idempotentes: si ya se envió (`alertas.*.enviado`), no se reenv
 
 ---
 
-## Integración Centinela V4 (radicador automático)
+## Integración Centinela V4 (área a radicar)
 
-Al detectar **liberación** (status → `A`), además del correo:
+Cuando un área **se libera** (status pasa a `A` desde otro distinto) y además **no tiene reopen o la reopen es posterior a la fecha y hora actual**, el visor la escribe en:
 
-1. Lanza `radicadorBot.js` (vía `radicadorBuscadorTitulos.js`) con empresa, pin, **NombreArea** y la ruta a `areas/Totas.json`
-2. Centinela lee esa área directamente desde Totas (no se crea JSON en `Centinela_V4/areas`)
-3. El visor pausa unos segundos en esa área antes de continuar
+`C:\Centinela_V4\areas\<Empresa>\areaARadicar.json`
+
+El visor de Centinela de esa empresa (p. ej. `CARNEOLAVisor.js`), que está esperando en el PIN, toma el área y la radica. El visor de BuscaTitulos pausa unos segundos y continúa.
+
+- Si la carpeta de la empresa no existe en Centinela, no se crea: se muestra `Error escribiendo areaARadicar.json` en consola.
+- Si una reopen ya pasó, se registra la liberación pero no se envía a radicar.
+- Cada área se envía una sola vez (`alertas.liberacion.areaARadicarEscrito` en su JSON de celda).
 
 ### Configuración
 
-Copia la plantilla y complétala:
-
-```bash
-copy config\centinela\empresas.example.json config\centinela\empresas.json
-```
-
-Edita [`config/centinela/empresas.json`](config/centinela/empresas.json) por cada empresa monitoreada:
-
-| Campo | Descripción |
-|-------|-------------|
-| `activo` | `true` para habilitar el radicador automático |
-| `empresa` | Clave en `InformacionEmpresas.json` de Centinela V4 |
-| `codigoPin` | Clave en `Pines.json` de Centinela V4 |
-| `agente` | `0` = login empresa · `1` = login agente |
-| `userAgente` / `passAgente` | Credenciales agente (si `agente=1`; si `0` usa `-`) |
-
-Rutas globales en [`config/centinela/config.json`](config/centinela/config.json):
+[`config/centinela/config.json`](config/centinela/config.json):
 
 - `centinelaV4Path`: ruta a Centinela V4 (default `C:\Centinela_V4`)
-- `buscaTitulosAreasPath`: ruta al JSON de áreas (default `C:\BuscaTitulos\areas\Totas.json`)
-- `radicadorScript`: script a lanzar (`radicadorBot.js`)
-- `ventanaVisible`: abrir consola del radicador
-- `pausaTrasLiberacionMs`: pausa tras lanzar el radicador
+- `pausaTrasLiberacionMs`: pausa tras enviar un área a radicar (default 5000)
 
-Equivalente manual:
-
-```bash
-node radicadorBuscadorTitulos.js CARNEOLA Co KAQ-11171PRUEBA 1 43987 "Sagitario_2026**" "C:\BuscaTitulos\areas\Totas.json"
-```
-
-Centinela busca en Totas la clave `CARNEOLA` y el `NombreArea` `KAQ-11171PRUEBA`, y radica solo esa área.
-
-Ejemplo Collective con agente:
+[`config/centinela/empresas.json`](config/centinela/empresas.example.json) es opcional y solo traduce nombres: si la empresa se llama distinto en BuscaTitulos y en las carpetas de Centinela, pon el nombre de Centinela en `empresa`. Si no está, se usa el mismo nombre.
 
 ```json
 {
-  "Collective": {
-    "activo": true,
-    "empresa": "Collective",
-    "codigoPin": "Co",
-    "agente": 1,
-    "userAgente": "43987",
-    "passAgente": "tu_clave"
-  }
+  "CARNEOLA": { "empresa": "CARNEOLA" }
 }
 ```
-
-> `config/centinela/empresas.json` está en `.gitignore` — no subas credenciales al repositorio.
-
-El estado del radicador queda en cada JSON de celda: `alertas.liberacion.radicadorLanzado`, `radicadorFecha`, `radicadorError`.
 
 ---
 

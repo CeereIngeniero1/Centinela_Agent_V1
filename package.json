@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node buscaTitulos.js",
     "visor": "node visorGeografico.js Collective",
-    "visor:general": "node visorGeograficoGeneral.js Totas",
+    "visor:general": "node visorGeografico.js Totas",
     "unir-areas": "node unirAreas.js"
   },
   "keywords": [],

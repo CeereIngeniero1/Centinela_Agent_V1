@@ -1,6 +1,6 @@
 const colors = require("colors");
 const { correo } = require("./correo");
-const { lanzarRadicadorLiberacion } = require("./centinelaRadicador");
+const { encolarAreaARadicar } = require("./centinelaRadicador");
 
 const MESES = {
   jan: 0,
@@ -84,9 +84,11 @@ function crearEstadoAlertasBase(anterior, registro) {
       statusAnterior,
       statusActual,
       errorEnvio: null,
-      radicadorLanzado: Boolean(anterior?.alertas?.liberacion?.radicadorLanzado),
-      radicadorFecha: anterior?.alertas?.liberacion?.radicadorFecha || null,
-      radicadorError: null,
+      areaARadicarEscrito: Boolean(
+        anterior?.alertas?.liberacion?.areaARadicarEscrito
+      ),
+      areaARadicarFecha: anterior?.alertas?.liberacion?.areaARadicarFecha || null,
+      areaARadicarError: null,
     },
     reapertura: {
       enviado: Boolean(anterior?.alertas?.reapertura?.enviado),
@@ -107,6 +109,22 @@ function describirEstadoCelda(atributos) {
     return { mensaje: "Estado: LIBRE (A)", libre: true };
   }
   return { mensaje: `Estado: NO LIBRE (${codigo})`, libre: false };
+}
+
+/** Se encola si no hay reopen, o si la reopen es posterior a la fecha y hora actual. */
+function cumpleReopenParaEncolar(textoFecha) {
+  const limpio = String(textoFecha || "").trim();
+  if (!limpio) {
+    return { ok: true, motivo: "sin reopen" };
+  }
+  const fecha = parseFechaReapertura(limpio);
+  if (!fecha) {
+    return { ok: true, motivo: "sin reopen válida" };
+  }
+  if (fecha.getTime() > Date.now()) {
+    return { ok: true, motivo: `reopen futura (${limpio})` };
+  }
+  return { ok: false, motivo: `reopen no futura (${limpio})` };
 }
 
 function evaluarCambiosCelda(anterior, registro) {
@@ -146,21 +164,45 @@ async function procesarAlertasYCorreo({ anterior, registro, empresa }) {
   const alertas = crearEstadoAlertasBase(anterior, registro);
   const cambios = evaluarCambiosCelda(anterior, registro);
 
-  if (cambios.liberacion && !alertas.liberacion.radicadorLanzado) {
-    const resultado = await lanzarRadicadorLiberacion({ empresa, registro });
-    if (resultado.ok) {
-      alertas.liberacion.radicadorLanzado = true;
-      alertas.liberacion.radicadorFecha = new Date().toISOString();
-    } else if (!resultado.omitido) {
-      alertas.liberacion.radicadorError = resultado.error;
-    }
-  } else if (cambios.liberacion && alertas.liberacion.radicadorLanzado) {
+  const reopen = cumpleReopenParaEncolar(registro.atributos?.CELL_REOPENING_DATE);
+
+  if (cambios.liberacion && alertas.liberacion.areaARadicarEscrito) {
     console.log(
-      colors.yellow("  Radicador ya lanzado previamente, omitiendo")
+      colors.yellow("  Área ya enviada a areaARadicar.json, omitiendo")
     );
+  } else if (cambios.liberacion && !reopen.ok) {
+    console.log(
+      colors.yellow(`  Liberación detectada, pero ${reopen.motivo} → no se envía a radicar`)
+    );
+  } else if (cambios.liberacion) {
+    try {
+      const destino = encolarAreaARadicar({ ...registro, empresa });
+      alertas.liberacion.areaARadicarEscrito = true;
+      alertas.liberacion.areaARadicarFecha = new Date().toISOString();
+      console.log(
+        colors.green(
+          `  AREA A RADICAR: ${registro.NombreArea} → ${destino} (${reopen.motivo})`
+        )
+      );
+    } catch (error) {
+      alertas.liberacion.areaARadicarError = error.message;
+      console.log(
+        colors.red(`  Error escribiendo areaARadicar.json: ${error.message}`)
+      );
+    }
   }
 
-  if (cambios.liberacion && !alertas.liberacion.enviado) {
+  // Un correo de liberación que falló se reintenta en los ciclos siguientes mientras siga libre
+  const correoLiberacionPendiente =
+    !cambios.liberacion &&
+    !alertas.liberacion.enviado &&
+    Boolean(anterior?.alertas?.liberacion?.errorEnvio) &&
+    registro.atributos?.CELL_STATUS_CODE === "A";
+
+  if ((cambios.liberacion || correoLiberacionPendiente) && !alertas.liberacion.enviado) {
+    if (correoLiberacionPendiente) {
+      console.log(colors.cyan("  Reintentando correo de liberación pendiente..."));
+    }
     try {
       await correo(1, registro.NombreArea, registro.Referencia, { empresa });
       alertas.liberacion.enviado = true;
@@ -170,7 +212,11 @@ async function procesarAlertasYCorreo({ anterior, registro, empresa }) {
       );
     } catch (error) {
       alertas.liberacion.errorEnvio = error.message;
-      console.log(colors.red(`  Error enviando correo liberación: ${error.message}`));
+      console.log(
+        colors.red(
+          `  Error enviando correo liberación (se reintentará en el próximo ciclo): ${error.message}`
+        )
+      );
     }
   } else if (cambios.liberacion && alertas.liberacion.enviado) {
     console.log(
@@ -203,6 +249,7 @@ async function procesarAlertasYCorreo({ anterior, registro, empresa }) {
 module.exports = {
   parseFechaReapertura,
   esFechaFutura,
+  cumpleReopenParaEncolar,
   describirEstadoCelda,
   evaluarCambiosCelda,
   procesarAlertasYCorreo,

@@ -2,8 +2,10 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 const colors = require("colors");
+const { cargarAreas } = require("./cargarAreas");
 
-const ARCHIVO_AREAS = process.argv[2] || "Collective";
+// node buscaTitulos.js <json> → mismo formato que visorGeografico.js
+const ENTRADA_AREAS = process.argv[2] || "Collective";
 const SEARCH_URL =
   "https://annamineria.anm.gov.co/sigm/externalLogin#/staSearchTitleApplications?lang=es";
 const ESPERA_ENTRE_BUSQUEDAS_MS = 3000;
@@ -11,18 +13,19 @@ const ESPERA_RESULTADOS_MS = 10000;
 const MAX_REINTENTOS = 2;
 const BASE_DATOS_DIR = path.join(__dirname, "base de datos");
 
-const areasPath = path.join(__dirname, "areas", `${ARCHIVO_AREAS}.json`);
-if (!fs.existsSync(areasPath)) {
-  console.error(
-    colors.red(`No se encontró el archivo de áreas: ${areasPath}`)
+let Areas;
+let ARCHIVO_AREAS;
+try {
+  const cargado = cargarAreas(ENTRADA_AREAS);
+  Areas = cargado.areas;
+  ARCHIVO_AREAS = cargado.nombre;
+  console.log(
+    colors.cyan(`Áreas cargadas: ${cargado.ruta} (${Areas.length} áreas)`)
   );
+} catch (error) {
+  console.error(colors.red(error.message));
   process.exit(1);
 }
-
-const Areas = JSON.parse(fs.readFileSync(areasPath, "utf-8"));
-console.log(
-  colors.cyan(`Áreas cargadas: ${ARCHIVO_AREAS}.json (${Areas.length} áreas)`)
-);
 
 function guardarJson(ruta, datos) {
   fs.mkdirSync(path.dirname(ruta), { recursive: true });
