@@ -1,5 +1,14 @@
 {
   "MAX": [
+
+      
+      {
+        "NombreArea": "AreapruebaAVISO",
+        "Referencia": "18N02G19E24P",
+        "Celdas": [
+          "18N02G19E24P"
+        ]
+    },
     {
       "NombreArea": "512998",
       "Referencia": "18P09K13C06G",
